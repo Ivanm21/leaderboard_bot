@@ -73,7 +73,7 @@ def save_activity(conn, name:str, points:int, author:int):
     )
     
 
-# drop_table(table='activities')
+drop_table(table='activities')
 
 
 
