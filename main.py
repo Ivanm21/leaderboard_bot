@@ -6,7 +6,10 @@ from telegram.ext import (Updater, MessageHandler, CommandHandler, ConversationH
 
 import os 
 
-from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id)
+from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id,
+                    Leaderboard, get_leaderboard_by_id, 
+                    User, get_user_by_id, 
+                    Participant, get_participant_by_user_id_and_leaderboard_id)
 import gcloud
 
 
@@ -29,19 +32,66 @@ ACTIVITY, POINTS, IDLE, DELETE, USER_INPUT  = range(5)
 
 #TODO: Implement perform_activity action and command
 
-#TODO: Check if leaderboard is created. 
-# If NO: 
-## create, 
-## add all Chat members as Participants
-## ask to add first Activity
-# If YES: 
-## add all Chat members as Participants if not added
-## Print current score and ask for input
 def start(update: Update, context):
 
     update.message.reply_text(
         'Ok, let\'s start'
     )
+
+    # """
+    # Create Leaderboard if do not exists 
+    # Update Leaderboard if exists
+    # """
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+
+    if chat_type == 'private':
+        leaderboard_name = update.effective_chat.username
+    else: 
+        leaderboard_name = update.effective_chat.title
+
+    leaderboard = get_leaderboard_by_id(leaderboard_id=chat_id)
+    
+
+    #If leaderboard is not present - create new
+    if not leaderboard:
+        leaderboard = Leaderboard(id=chat_id, name=leaderboard_name)
+    else:
+        #Update Leaderboard name, in case Chat name was updated
+        leaderboard.name = leaderboard_name
+    leaderboard.save_leaderboard()
+
+    # """
+    # Check if User is db, create if not, update is yes
+    # """
+    user_id = update.effective_user.id
+    user_name = update.effective_user.username
+    user = get_user_by_id(id=user_id)
+
+    if not user:
+        user = User(name=user_name, id=user_id)
+    else:
+        #Adding this check because user can change the name
+        user.name = user_name
+    user.save_user()
+
+    # """
+    # Add Participant to db if not present
+    # """
+    participant = get_participant_by_user_id_and_leaderboard_id(user_id = user.id, leaderboard_id=leaderboard.id)
+
+    if not participant: 
+        participant = Participant(user_id = user.id, leaderboard_id=leaderboard.id)
+        participant.save_participant()
+
+        #If group chat - notify participants that new participant was added 
+        if chat_type != 'private':
+            update.message.reply_text(
+                f'{user.name} was added to the Leaderboard {leaderboard.name}'
+            )   
+
+    #TODO: Need to check if any activity is present in leaderboard.
+    # Ask to add new activities only in case no activities present  
     update.message.reply_text(
         'Send me the name of a first activity'
     )
