@@ -85,10 +85,11 @@ class Activity(Base):
     performed_activities = relationship("Performed_Activity")
 
 
-    def __init__(self, activity_name, points, author_user_id):
+    def __init__(self, activity_name, points, author_user_id, leaderboard_id):
         self.activity_name = activity_name
         self.points = points
         self.author_user_id = author_user_id
+        self.leaderboard_id =leaderboard_id
 
     @establish_session
     def save_activity(self, session):
@@ -98,7 +99,8 @@ class Activity(Base):
 
     @establish_session
     def delete_activity(self, session):
-        session.delete(self)
+        activity = session.merge(self)
+        session.delete(activity)
         session.commit()
         session.close()
 
@@ -123,6 +125,8 @@ def delete_activity_by_id(session, activity_id:int):
     if activity:
         session.delete(activity)
     session.close()
+
+
 
 class Leaderboard(Base):
 
@@ -154,6 +158,11 @@ def get_leaderboard_by_id(session, leaderboard_id:int):
     leaderboard = session.query(Leaderboard).filter_by(id=leaderboard_id).first()
     return leaderboard
 
+@establish_session
+def leaderboard_has_activities(session, leaderboard_id:int):
+    q = session.query(Activity).filter_by(leaderboard_id=leaderboard_id)
+    exists = session.query(Leaderboard.id).filter(q.exists()).scalar()
+    return exists
 
 class Participant(Base):
 

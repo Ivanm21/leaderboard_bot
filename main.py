@@ -1,13 +1,13 @@
 import logging
 
 import telegram
-from telegram import (Update, Message, InlineKeyboardButton, InlineKeyboardMarkup)
+from telegram import (Update, Message, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply)
 from telegram.ext import (Updater, MessageHandler, CommandHandler, ConversationHandler, Filters, CallbackQueryHandler)
 
 import os 
 
 from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id,
-                    Leaderboard, get_leaderboard_by_id, 
+                    Leaderboard, get_leaderboard_by_id, leaderboard_has_activities,
                     User, get_user_by_id, 
                     Participant, get_participant_by_user_id_and_leaderboard_id)
 import gcloud
@@ -87,16 +87,25 @@ def start(update: Update, context):
         #If group chat - notify participants that new participant was added 
         if chat_type != 'private':
             update.message.reply_text(
-                f'{user.name} was added to the Leaderboard {leaderboard.name}'
+                f'{user.name} was added to the Leaderboard {leaderboard.name}', 
+                quote=False
             )   
 
-    #TODO: Need to check if any activity is present in leaderboard.
-    # Ask to add new activities only in case no activities present  
-    update.message.reply_text(
-        'Send me the name of a first activity'
-    )
 
-    return ACTIVITY
+    # Get leaderboard activities 
+    acitivity_exists = leaderboard_has_activities(leaderboard_id = leaderboard.id)
+
+    if not acitivity_exists:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        force_reply = ForceReply(force_reply=True, selective=True)
+        update.message.reply_text(
+            'Seems there is no Activities. \nSend me the name of a first activity',
+            reply_markup=force_reply
+        )
+        return ACTIVITY
+    else: 
+        return wait_for_input(update, context)
 
 #TODO: Add check if activity with same name.lower() exists
 def add_activity(update: Update, context):
@@ -106,8 +115,13 @@ def add_activity(update: Update, context):
         f'Ok. Activity {context.user_data[ACTIVITY]} added',
         quote = True
     )
+
+    # Telegram clients will display a reply interface to the user 
+    # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+    force_reply = ForceReply(force_reply=True, selective=True)
     update.message.reply_text(
-        f'How many points should I assign for {context.user_data[ACTIVITY]}?'
+        f'How many points should I assign for {context.user_data[ACTIVITY]}?', 
+        reply_markup=force_reply,
     )
 
     return POINTS
@@ -117,20 +131,24 @@ def add_points(update: Update, context):
     try:
         int(points) 
     except ValueError:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        force_reply = ForceReply(force_reply=True, selective=True)
         update.message.reply_text(
-            f'{points} is not a number. Please enter number 😊'
+            f'{points} is not a number. Please enter number 😊', 
+            reply_markup=force_reply
         )
         return POINTS
     else:
 
-
         context.user_data[POINTS] = points
         update.message.reply_text(
-            f'Ok. Activity {context.user_data[ACTIVITY]} gives {context.user_data[POINTS]} points 😎'
+            f'Ok. Activity {context.user_data[ACTIVITY]} gives {context.user_data[POINTS]} points 😎', 
+            quote = False
         )
 
         # Saving activity to the database
-        act = Activity(activity_name=context.user_data[ACTIVITY], points=context.user_data[POINTS], author_user_id=update.effective_user.id )
+        act = Activity(activity_name=context.user_data[ACTIVITY], points=context.user_data[POINTS], author_user_id=update.effective_user.id, leaderboard_id =update.effective_chat.id  )
         act.save_activity()
 
         # Get new user input
@@ -152,7 +170,8 @@ def wait_for_input(update:Update, context):
     message_text = f'What would you like to do next? 😏'
     if update.message:
         update.message.reply_text(
-            message_text, reply_markup = keyboard_markup
+            message_text, reply_markup = keyboard_markup, 
+            quote = False
         )
     # Check if user clicked inline button
     else:
@@ -184,9 +203,14 @@ def idle(update:Update, context):
     ) 
 
     if choice == 0:
-
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’)
+        # TODO: Figure out how to do selective force_reply. Some how set message.id to inline button id?
+        # Alternatevly set selective=false
+        force_reply = ForceReply(force_reply=True, selective=True)
         query.message.reply_text(
-            f'Ok, send me name of the Activity?'
+            f'Ok, send me the name of the Activity?', 
+            reply_markup=force_reply
         )
         return ACTIVITY
     elif choice == 1: 
@@ -203,7 +227,8 @@ def idle(update:Update, context):
 
 
         keyboard = []
-
+        #TODO: Add Cancel button. Should abort deletion of the activity. 
+        # Should end interaction with bot 
         for act in activities:
             key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=act.id)]
             keyboard.append(key)
@@ -263,7 +288,7 @@ def main():
             POINTS : [MessageHandler(Filters.all, add_points, pass_user_data=True)], 
             IDLE : [CallbackQueryHandler( idle,  pass_user_data=True)], 
             DELETE : [CallbackQueryHandler(delete, pass_user_data=True)],
-            # USER_INPUT : [CallbackQueryHandler(delete, pass_user_data=True)]
+            USER_INPUT : [CallbackQueryHandler(delete, pass_user_data=True)]
         }, 
         fallbacks=[CommandHandler('start', start)]
     )
