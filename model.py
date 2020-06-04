@@ -1,10 +1,12 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, BigInteger, DateTime, ForeignKey
-from sqlalchemy.orm import (sessionmaker, relationship)
+from sqlalchemy.orm import (sessionmaker, relationship, backref)
 from sqlalchemy import create_engine, engine
 from sqlalchemy.sql import func
 import os
 import logging
+
+import codecs
 
 
 db_user = os.environ.get("DB_USER")
@@ -33,7 +35,7 @@ def ensure_connection(func):
                 password=db_pass,
                 host=host,
                 port=port,
-                database=db_name,
+                database=db_name
                 # query={"unix_socket": "/cloudsql/{}".format(cloud_sql_connection_name)},
             ),
             pool_size=5,
@@ -82,7 +84,7 @@ class Activity(Base):
     leaderboard_id = Column(BigInteger, ForeignKey('leaderboards.id'))
 
     # Relationships 
-    performed_activities = relationship("Performed_Activity")
+    performed_activities = relationship("Performed_Activity", cascade="all, delete-orphan")
 
 
     def __init__(self, activity_name, points, author_user_id, leaderboard_id):
@@ -126,7 +128,17 @@ def delete_activity_by_id(session, activity_id:int):
         session.delete(activity)
     session.close()
 
+@establish_session
+def get_leaderboard_by_activity_id(session, activity_id:int):
+    activity = session.query(Activity).filter_by(id=activity_id).first()
+    leaderboard = session.query(Leaderboard).filter_by(id = activity.leaderboard_id).first()
+    return leaderboard
 
+
+@establish_session
+def get_leaderboard_activities(session, leaderboard_id:int):
+    result = session.query(Activity).filter_by(leaderboard_id=leaderboard_id)
+    return result
 
 class Leaderboard(Base):
 
@@ -158,11 +170,32 @@ def get_leaderboard_by_id(session, leaderboard_id:int):
     leaderboard = session.query(Leaderboard).filter_by(id=leaderboard_id).first()
     return leaderboard
 
+
 @establish_session
 def leaderboard_has_activities(session, leaderboard_id:int):
     q = session.query(Activity).filter_by(leaderboard_id=leaderboard_id)
     exists = session.query(Leaderboard.id).filter(q.exists()).scalar()
     return exists
+
+@establish_session
+def get_leaderboard_score(session, leaderboard_id:int):
+    qeury = f'''
+    SELECT users.name, COALESCE(SUM(a.points), 0) as 'points'
+    FROM `leaderboard`.`leaderboards` lb
+    JOIN `leaderboard`.`participants` p 
+        ON lb.id = p.leaderboard_id
+    JOIN `leaderboard`.`users` users
+        ON p.user_id = users.id
+    LEFT JOIN `leaderboard`.`performed_activity` pa
+        ON p.id = pa.participant_id
+    LEFT JOIN `leaderboard`.`activities` a
+        ON pa.activity_id = a.id 
+    WHERE lb.id = {leaderboard_id}
+    GROUP BY p.id
+    ORDER BY COALESCE(SUM(a.points), 0) DESC
+    '''
+    result = session.execute(qeury)
+    return result
 
 class Participant(Base):
 
@@ -173,7 +206,8 @@ class Participant(Base):
     user_id = Column(BigInteger, ForeignKey('users.id'))
     time_created = Column(DateTime(timezone=True), nullable=False, default=func.now())
 
-    performed_activities = relationship("Performed_Activity")
+    performed_activities = relationship("Performed_Activity", cascade="all, delete-orphan")
+
 
     @establish_session
     def save_participant(self, session):
@@ -185,6 +219,12 @@ class Participant(Base):
 def get_participant_by_user_id_and_leaderboard_id(session, user_id:int, leaderboard_id:int):
     participant = session.query(Participant).filter_by(leaderboard_id=leaderboard_id, user_id=user_id).first()
     return participant
+
+@establish_session
+def get_participants_by_leaderboard_id(session, leaderboard_id:int):
+    participants = session.query(Participant).filter_by(leaderboard_id=leaderboard_id)
+    return participants
+
 
 class User(Base):
 
@@ -227,6 +267,19 @@ class Performed_Activity(Base):
     #Relationships
     activity_id = Column(BigInteger, ForeignKey('activities.id'))
     participant_id = Column(BigInteger, ForeignKey('participants.id'))
+
+    activities = relationship('Activity',
+                                backref=backref('performed_activities_act', cascade="all, delete-orphan")
+                            )
+    
+    participants = relationship('Participant',
+                                backref=backref('performed_activities_partic', cascade="all, delete-orphan")
+                            )
+     
+
+    def __init__(self, activity_id:int, participant_id:id):
+        self.activity_id = activity_id
+        self.participant_id = participant_id
 
     @establish_session
     def save_performed_activity(self, session):

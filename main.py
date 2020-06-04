@@ -6,10 +6,11 @@ from telegram.ext import (Updater, MessageHandler, CommandHandler, ConversationH
 
 import os 
 
-from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id,
-                    Leaderboard, get_leaderboard_by_id, leaderboard_has_activities,
-                    User, get_user_by_id, 
-                    Participant, get_participant_by_user_id_and_leaderboard_id)
+from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id, get_leaderboard_activities,
+                    Leaderboard, get_leaderboard_by_id, leaderboard_has_activities, get_leaderboard_by_activity_id,
+                    User, get_user_by_id, get_leaderboard_score,
+                    Participant, get_participant_by_user_id_and_leaderboard_id,
+                    Performed_Activity)
 import gcloud
 
 
@@ -19,18 +20,25 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 
-ACTIVITY, POINTS, IDLE, DELETE, USER_INPUT  = range(5) 
+ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY  = range(5) 
 
 
 #TODO: Implement commands
-# /show_score
-# /show_activities
-# /add_activity
-# /perform_activity
+# All activities should be added to the bot via @botfather /setcommands
+#
+# 
+# /delete_activity - Delete Activity
+# /cancel - End interaction with the bot
+# /show_log - Show last 10 Executed Activities
+ 
+# All activities should be added to the bot via @botfather /setcommands
+# Available commands:
+# /start - Enter chat's Leaderboard
+# /add_activity - Add new Activity
+# /execute_activity - Record Activity Execution 
+# /show_score - Show current score 
+# /show_activities - Show Leaderboard's Activityes 
 
-#TODO: Reserch how to show list of the commands to the user
-
-#TODO: Implement perform_activity action and command
 
 def start(update: Update, context):
 
@@ -38,10 +46,34 @@ def start(update: Update, context):
         'Ok, let\'s start'
     )
 
-    # """
     # Create Leaderboard if do not exists 
-    # Update Leaderboard if exists
-    # """
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    # Add user to the Leaderboard
+    add_participant(update, user, leaderboard)
+
+    # Get leaderboard activities 
+    acitivity_exists = leaderboard_has_activities(leaderboard_id = leaderboard.id)
+
+    if not acitivity_exists:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        force_reply = ForceReply(force_reply=True, selective=True)
+        update.message.reply_text(
+            'Seems there is no Activities. \nSend me the name of a first activity',
+            reply_markup=force_reply
+        )
+        return ACTIVITY
+    else: 
+        return wait_for_input(update, context)
+
+
+def create_leaderboard(update:Update, context):
+    """
+    Create Leaderboard if do not exists 
+    Update Leaderboard if exists
+    """
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type
 
@@ -61,9 +93,12 @@ def start(update: Update, context):
         leaderboard.name = leaderboard_name
     leaderboard.save_leaderboard()
 
-    # """
-    # Check if User is db, create if not, update is yes
-    # """
+    return leaderboard
+
+def create_user(update:Update, context):
+    """
+    Check if User is db, create if not, update is yes
+    """
     user_id = update.effective_user.id
     user_name = update.effective_user.username
     user = get_user_by_id(id=user_id)
@@ -74,10 +109,13 @@ def start(update: Update, context):
         #Adding this check because user can change the name
         user.name = user_name
     user.save_user()
+    return user
 
-    # """
-    # Add Participant to db if not present
-    # """
+def add_participant(update:Update, user:User, leaderboard:Leaderboard):
+    """
+    Add Participant to db if not present
+    """
+    chat_type = update.effective_chat.type
     participant = get_participant_by_user_id_and_leaderboard_id(user_id = user.id, leaderboard_id=leaderboard.id)
 
     if not participant: 
@@ -89,23 +127,9 @@ def start(update: Update, context):
             update.message.reply_text(
                 f'{user.name} was added to the Leaderboard {leaderboard.name}', 
                 quote=False
-            )   
+            )
+    return participant   
 
-
-    # Get leaderboard activities 
-    acitivity_exists = leaderboard_has_activities(leaderboard_id = leaderboard.id)
-
-    if not acitivity_exists:
-        # Telegram clients will display a reply interface to the user 
-        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
-        force_reply = ForceReply(force_reply=True, selective=True)
-        update.message.reply_text(
-            'Seems there is no Activities. \nSend me the name of a first activity',
-            reply_markup=force_reply
-        )
-        return ACTIVITY
-    else: 
-        return wait_for_input(update, context)
 
 #TODO: Add check if activity with same name.lower() exists
 def add_activity(update: Update, context):
@@ -125,6 +149,92 @@ def add_activity(update: Update, context):
     )
 
     return POINTS
+
+#/add_activity command handler
+def add_activity_command_handler(update:Update, context):
+    force_reply = ForceReply(force_reply=True, selective=True)
+    update.message.reply_text(
+        f'What is the name of the Activity?', 
+        reply_markup=force_reply,
+    )
+    return ACTIVITY
+
+# /execute_activity command handler
+def execute_activity_command_handler(update:Update, context):
+    # Create Leaderboard if do not exists 
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    # Add user to the Leaderboard
+    add_participant(update, user, leaderboard)
+    
+    # Get leaderboard activities 
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+
+    if activities.count() < 1:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        force_reply = ForceReply(force_reply=True, selective=True)
+        update.message.reply_text(
+            'Seems there is no Activities. \nSend me the name of a first activity',
+            reply_markup=force_reply
+        )
+        return ACTIVITY
+    else: 
+        keyboard = []
+        for i, act in enumerate(activities):
+            # Need this to understand what button was clicked
+            data_ = f'{i}_{act.id}'
+            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=data_)]
+            keyboard.append(key)
+        
+        keyboard_markup = InlineKeyboardMarkup(keyboard)
+        
+        update.message.reply_text(
+            f'What Acitivity you would like to record?', reply_markup=keyboard_markup
+        )
+        return EXECUTE_ACTIVITY
+
+def execute_activity(update:Update, context):
+    query = update.callback_query
+    query.answer()
+
+    button_id, activity_id = query.data.split('_')
+    activity_id = int(activity_id)
+    button_id = int(button_id)
+
+    #Remove Inline Keyboard
+    query.edit_message_reply_markup(
+        None
+    )
+    #Send user choise as a message
+    query.message.reply_text(
+        query.message.reply_markup.inline_keyboard[button_id][0].text, 
+        quote=False
+    ) 
+
+    #Get activity 
+    activity = get_activity_by_id(activity_id=activity_id)
+    leaderboard = get_leaderboard_by_activity_id(activity_id=activity_id)
+    #Record execution of the activity. Create Performed_Activity 
+
+    # Create/Update User 
+    user = create_user(update, context)
+    # Add user to the Leaderboard == Create Participant 
+    # Might be redundant but more robust :D 
+    participant = add_participant(update, user, leaderboard)
+
+    # Create performed Activity
+    performed_activity = Performed_Activity(activity_id = activity.id, participant_id = participant.id)    
+    performed_activity.save_performed_activity()
+
+    query.message.reply_text(
+            f'Activity {activity.activity_name} was tracked\n'
+            f'{activity.points} points were added to {user.name}', 
+            quote=False
+        )
+    return ConversationHandler.END
+
 
 def add_points(update: Update, context):
     points = update.message.text
@@ -158,6 +268,7 @@ def wait_for_input(update:Update, context):
     
     #TODO: Add Stop Button
     # Add Show Activities button
+    # Add record Activity button 
     keyboard = [
         [InlineKeyboardButton("➕ Add Activity", callback_data=0)], 
         [InlineKeyboardButton("➖ Delete Activity", callback_data=1)]
@@ -167,7 +278,7 @@ def wait_for_input(update:Update, context):
 
     # Send update to the user
     # Check if user entered any update
-    message_text = f'What would you like to do next? 😏'
+    message_text = f'What would you like to do? 😏'
     if update.message:
         update.message.reply_text(
             message_text, reply_markup = keyboard_markup, 
@@ -213,6 +324,7 @@ def idle(update:Update, context):
             reply_markup=force_reply
         )
         return ACTIVITY
+    #TODO: Change to the Leaderboard activities
     elif choice == 1: 
         # Reading all user activities from the database 
         # And displaying it as a list of InlineKeyboardButtons
@@ -241,8 +353,7 @@ def idle(update:Update, context):
 
         return DELETE
 
-#TODO: Ensure that once Activity is deleted all Performed_Activity entities are deleted as well 
-# Check if any Performed_Activity entities exists. If Yes ask for confirmation 
+#TODO: Check if any Performed_Activity entities exists. If Yes ask for confirmation 
 def delete(update:Update, context):
     query = update.callback_query
     query.answer()
@@ -267,9 +378,59 @@ def delete(update:Update, context):
 
 #TODO: Implement handling of stop command
 def cancel(update:Update, context):
-    upldate.message.reply_text(
+    update.message.reply_text(
         f'Ok. Bye 😕'
     )
+
+# /show_score - Shows Leaderboard score 
+def show_score_command_handler(update:Update, context):
+
+    chat_id = update.effective_chat.id
+    leaderboard = get_leaderboard_by_id(leaderboard_id=chat_id)
+
+    # Create/Update User 
+    user = create_user(update, context)
+    
+    score = get_leaderboard_score(leaderboard_id =leaderboard.id)
+    score_message = ''
+    if score:
+        for indx, row in enumerate(score):
+            score_message+= f"{'🥇 ' if indx == 0 else ''}" + f"{row['name']}" +' - '+ f"{row['points']}" + '💎\n  '
+        update.message.reply_text(
+            score_message
+        )
+    else:
+        update.message.reply_text(
+            f'Leaderboard has not started. Send /start to enter the Leaderboard🏆'
+        )
+
+    return ConversationHandler.END 
+
+# /show_activities - Shows Leaderboard's Activityes 
+def show_activities_command_handler(update:Update, context):
+    # Create Leaderboard if do not exists 
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    # Get leaderboard activities 
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+    
+    if activities.count() < 1:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        
+        update.message.reply_text(
+            'Seems there is no Activities. \n'
+            'Send /start or /add_activity command to add first activity'
+        )
+    else:
+        message = f"There {'is' if activities.count() == 1 else 'are'} {activities.count()} Activit{'y' if activities.count() == 1 else 'ies'}:\n"
+        for indx, act in enumerate(activities):
+            message += f'{indx+1}. {act.activity_name} ➖ {act.points} 💎\n'
+        update.message.reply_text(
+            message 
+        )
+    return ConversationHandler.END
 
 
 def main():
@@ -282,20 +443,28 @@ def main():
     updater = Updater(token=token, use_context=True)
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler('start', start),
+                     CommandHandler('add_activity', add_activity_command_handler), 
+                     CommandHandler('execute_activity', execute_activity_command_handler), 
+                     CommandHandler('show_score', show_score_command_handler), 
+                     CommandHandler('show_activities', show_activities_command_handler)], 
         states = {
-            ACTIVITY : [ MessageHandler(Filters.all, add_activity, pass_user_data=True)], 
+            ACTIVITY : [ MessageHandler(Filters.all, add_activity, pass_user_data=True)],
             POINTS : [MessageHandler(Filters.all, add_points, pass_user_data=True)], 
             IDLE : [CallbackQueryHandler( idle,  pass_user_data=True)], 
             DELETE : [CallbackQueryHandler(delete, pass_user_data=True)],
-            USER_INPUT : [CallbackQueryHandler(delete, pass_user_data=True)]
+            EXECUTE_ACTIVITY : [CallbackQueryHandler(execute_activity, pass_user_data=True)]
         }, 
-        fallbacks=[CommandHandler('start', start)]
+        fallbacks=[CommandHandler('start', start), 
+                 CommandHandler('execute_activity', execute_activity_command_handler), 
+                 CommandHandler('add_activity', add_activity_command_handler), 
+                 CommandHandler('show_score', show_score_command_handler), 
+                 CommandHandler('show_activities', show_activities_command_handler)]
     )
 
     #TODO: Implement /stop command 
 
-
+    
     #Create Dispatcher
     disp = updater.dispatcher
 
