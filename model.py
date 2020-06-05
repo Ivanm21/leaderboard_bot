@@ -173,8 +173,10 @@ def get_leaderboard_by_id(session, leaderboard_id:int):
 
 @establish_session
 def leaderboard_has_activities(session, leaderboard_id:int):
-    q = session.query(Activity).filter_by(leaderboard_id=leaderboard_id)
-    exists = session.query(Leaderboard.id).filter(q.exists()).scalar()
+    exists = False
+    q = session.query(Activity).filter_by(leaderboard_id=leaderboard_id).count()
+    if q:
+        exists = True
     return exists
 
 @establish_session
@@ -287,8 +289,25 @@ class Performed_Activity(Base):
         session.commit()
         session.close()
 
-
-
+@establish_session
+def get_leaderboard_log(session, leaderboard_id:int, count:int):
+    """
+    Returns Activities Execution records from leaderboard
+    """
+    query = f'''SELECT u.name, a.activity_name, a.points, pa.time_created
+            FROM `leaderboard`.`performed_activity` pa
+            JOIN `leaderboard`.`activities` a
+                ON a.id = pa.activity_id
+            JOIN `leaderboard`.`participants` p
+                ON p.id = pa.participant_id
+            JOIN `leaderboard`.`users` u
+                ON u.id = p.user_id
+            WHERE a.leaderboard_id = {leaderboard_id}
+            ORDER BY pa.time_created DESC
+            LIMIT {count};'''
+        
+    result = session.execute(query)
+    return result
 
 # TODO: Check how to create base class with save_entity_name(self) method in order not 
 # to repeat same code in each class

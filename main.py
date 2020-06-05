@@ -9,7 +9,7 @@ import os
 from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id, get_leaderboard_activities,
                     Leaderboard, get_leaderboard_by_id, leaderboard_has_activities, get_leaderboard_by_activity_id,
                     User, get_user_by_id, get_leaderboard_score,
-                    Participant, get_participant_by_user_id_and_leaderboard_id,
+                    Participant, get_participant_by_user_id_and_leaderboard_id,get_leaderboard_log, 
                     Performed_Activity)
 import gcloud
 
@@ -20,24 +20,29 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 
+# State variables
 ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY  = range(5) 
+
+# Variables for start flow 
+EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
 
 
 #TODO: Implement commands
 # All activities should be added to the bot via @botfather /setcommands
 #
 # 
-# /delete_activity - Delete Activity
-# /cancel - End interaction with the bot
-# /show_log - Show last 10 Executed Activities
  
 # All activities should be added to the bot via @botfather /setcommands
 # Available commands:
 # /start - Enter chat's Leaderboard
-# /add_activity - Add new Activity
 # /execute_activity - Record Activity Execution 
 # /show_score - Show current score 
+# /add_activity - Add new Activity
+# /delete_activity - Delete Activity
 # /show_activities - Show Leaderboard's Activityes 
+# /show_log - Show last 10 Executed Activities
+# /cancel - End interaction with the bot
+
 
 
 def start(update: Update, context):
@@ -59,10 +64,11 @@ def start(update: Update, context):
     if not acitivity_exists:
         # Telegram clients will display a reply interface to the user 
         # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
-        force_reply = ForceReply(force_reply=True, selective=True)
+        force_reply = ForceReply(force_reply=True)
         update.message.reply_text(
             'Seems there is no Activities. \nSend me the name of a first activity',
-            reply_markup=force_reply
+            reply_markup=force_reply,
+            quote = False
         )
         return ACTIVITY
     else: 
@@ -131,109 +137,38 @@ def add_participant(update:Update, user:User, leaderboard:Leaderboard):
     return participant   
 
 
+
+#/add_activity command handler
+def add_activity_command_handler(update:Update, context):
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    force_reply = ForceReply(force_reply=True)
+    query.message.reply_text(
+        f'What is the name of the Activity?', 
+        reply_markup=force_reply,
+        quote = False
+    )
+    return ACTIVITY
+
 #TODO: Add check if activity with same name.lower() exists
 def add_activity(update: Update, context):
     activity = update.message.text
     context.user_data[ACTIVITY] = activity
-    update.message.reply_text(
-        f'Ok. Activity {context.user_data[ACTIVITY]} added',
-        quote = True
-    )
 
     # Telegram clients will display a reply interface to the user 
     # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
-    force_reply = ForceReply(force_reply=True, selective=True)
+    force_reply = ForceReply(force_reply=True)
     update.message.reply_text(
         f'How many points should I assign for {context.user_data[ACTIVITY]}?', 
         reply_markup=force_reply,
+        quote = False
     )
 
     return POINTS
-
-#/add_activity command handler
-def add_activity_command_handler(update:Update, context):
-    force_reply = ForceReply(force_reply=True, selective=True)
-    update.message.reply_text(
-        f'What is the name of the Activity?', 
-        reply_markup=force_reply,
-    )
-    return ACTIVITY
-
-# /execute_activity command handler
-def execute_activity_command_handler(update:Update, context):
-    # Create Leaderboard if do not exists 
-    leaderboard = create_leaderboard(update, context)
-    # Create/Update User 
-    user = create_user(update, context)
-    # Add user to the Leaderboard
-    add_participant(update, user, leaderboard)
-    
-    # Get leaderboard activities 
-    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
-
-    if activities.count() < 1:
-        # Telegram clients will display a reply interface to the user 
-        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
-        force_reply = ForceReply(force_reply=True, selective=True)
-        update.message.reply_text(
-            'Seems there is no Activities. \nSend me the name of a first activity',
-            reply_markup=force_reply
-        )
-        return ACTIVITY
-    else: 
-        keyboard = []
-        for i, act in enumerate(activities):
-            # Need this to understand what button was clicked
-            data_ = f'{i}_{act.id}'
-            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=data_)]
-            keyboard.append(key)
-        
-        keyboard_markup = InlineKeyboardMarkup(keyboard)
-        
-        update.message.reply_text(
-            f'What Acitivity you would like to record?', reply_markup=keyboard_markup
-        )
-        return EXECUTE_ACTIVITY
-
-def execute_activity(update:Update, context):
-    query = update.callback_query
-    query.answer()
-
-    button_id, activity_id = query.data.split('_')
-    activity_id = int(activity_id)
-    button_id = int(button_id)
-
-    #Remove Inline Keyboard
-    query.edit_message_reply_markup(
-        None
-    )
-    #Send user choise as a message
-    query.message.reply_text(
-        query.message.reply_markup.inline_keyboard[button_id][0].text, 
-        quote=False
-    ) 
-
-    #Get activity 
-    activity = get_activity_by_id(activity_id=activity_id)
-    leaderboard = get_leaderboard_by_activity_id(activity_id=activity_id)
-    #Record execution of the activity. Create Performed_Activity 
-
-    # Create/Update User 
-    user = create_user(update, context)
-    # Add user to the Leaderboard == Create Participant 
-    # Might be redundant but more robust :D 
-    participant = add_participant(update, user, leaderboard)
-
-    # Create performed Activity
-    performed_activity = Performed_Activity(activity_id = activity.id, participant_id = participant.id)    
-    performed_activity.save_performed_activity()
-
-    query.message.reply_text(
-            f'Activity {activity.activity_name} was tracked\n'
-            f'{activity.points} points were added to {user.name}', 
-            quote=False
-        )
-    return ConversationHandler.END
 
 
 def add_points(update: Update, context):
@@ -270,8 +205,10 @@ def wait_for_input(update:Update, context):
     # Add Show Activities button
     # Add record Activity button 
     keyboard = [
-        [InlineKeyboardButton("➕ Add Activity", callback_data=0)], 
-        [InlineKeyboardButton("➖ Delete Activity", callback_data=1)]
+        [InlineKeyboardButton("✅ Execute Activity", callback_data=EXECUTE)],
+        [InlineKeyboardButton("➕ Add Activity", callback_data=TO_ADD),InlineKeyboardButton("➖ Delete Activity", callback_data=TO_DELETE)],
+        [InlineKeyboardButton("🏅 Show Score", callback_data=SCORE),InlineKeyboardButton("📝 Show Log", callback_data=LOG)], 
+        [InlineKeyboardButton("🛑 End", callback_data=CANCEL)]
     ]
 
     keyboard_markup = InlineKeyboardMarkup(keyboard)
@@ -289,7 +226,8 @@ def wait_for_input(update:Update, context):
         query = update.callback_query
         query.answer()
         query.message.reply_text(
-            message_text, reply_markup = keyboard_markup
+            message_text, reply_markup = keyboard_markup,
+            quote = False
         )
 
      
@@ -304,86 +242,243 @@ def idle(update:Update, context):
     #User choice
     choice = int(query.data)
 
+
     #Remove InLineKeyboard
     query.edit_message_text(
         query.message.text
     )
-    #Send user choise as a message
-    query.message.reply_text(
-        query.message.reply_markup.inline_keyboard[choice][0].text
-    ) 
 
-    if choice == 0:
+    if choice == EXECUTE:
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[0][0].text, 
+            quote=False
+        )
+        return execute_activity_command_handler(update, context)
+    elif choice == TO_ADD:
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[1][0].text,
+            quote = False
+        )
+        return add_activity_command_handler(update, context)
+    elif choice == TO_DELETE: 
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[1][1].text,
+            quote = False
+        )
+        return delete_command_handler(update, context)
+    elif choice == SCORE:
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[2][0].text,
+            quote = False
+        )
+        return show_score_command_handler(update, context)
+    elif choice == LOG:
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[2][1].text,
+            quote = False
+        )
+        return show_log_command_handler(update, context)
+    elif choice == CANCEL:
+        query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[3][0].text,
+            quote = False
+        )
+        return cancel(update, context)
+
+# /execute_activity command handler
+def execute_activity_command_handler(update:Update, context):
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+
+    # Create Leaderboard if do not exists 
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    # Add user to the Leaderboard
+    add_participant(update, user, leaderboard)
+    
+    # Get leaderboard activities 
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+
+    if activities.count() < 1:
         # Telegram clients will display a reply interface to the user 
-        # (act as if the user has selected the bot’s message and tapped ‘Reply’)
-        # TODO: Figure out how to do selective force_reply. Some how set message.id to inline button id?
-        # Alternatevly set selective=false
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
         force_reply = ForceReply(force_reply=True, selective=True)
         query.message.reply_text(
-            f'Ok, send me the name of the Activity?', 
-            reply_markup=force_reply
+            'Seems there is no Activities. \nSend me the name of a first activity',
+            reply_markup=force_reply,
+            quote = False
         )
         return ACTIVITY
-    #TODO: Change to the Leaderboard activities
-    elif choice == 1: 
-        # Reading all user activities from the database 
-        # And displaying it as a list of InlineKeyboardButtons
-        activities = get_activities_by_user_id(user_id = update.effective_user.id )
-
-        # If there is no activities return to default
-        if activities.count() < 1:
-            query.message.reply_text(
-                f'✋ There are no activities left 😐'
-            )
-            return wait_for_input(update, context)
-
-
+    else: 
         keyboard = []
-        #TODO: Add Cancel button. Should abort deletion of the activity. 
-        # Should end interaction with bot 
-        for act in activities:
-            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=act.id)]
+        for i, act in enumerate(activities):
+            # Need this to understand what button was clicked
+            data_ = f'{i}_{act.id}'
+            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=data_)]
             keyboard.append(key)
         
+        key = [InlineKeyboardButton(f'❌ Cancel', callback_data=f"{activities.count()}_{-1}")]
+        keyboard.append(key)
+
         keyboard_markup = InlineKeyboardMarkup(keyboard)
         
         query.message.reply_text(
-            f'What Acitivity you would like to delete?', reply_markup=keyboard_markup
+            f'What Acitivity you would like to record?', reply_markup=keyboard_markup,
+            quote = False
+        )
+        return EXECUTE_ACTIVITY
+
+def execute_activity(update:Update, context):
+    query = update.callback_query
+    query.answer()
+
+    button_id, activity_id = query.data.split('_')
+    activity_id = int(activity_id)
+    button_id = int(button_id)
+
+    #Remove Inline Keyboard
+    query.edit_message_reply_markup(
+        None, 
+        quote = False
+    )
+    #Send user choise as a message
+    query.message.reply_text(
+        query.message.reply_markup.inline_keyboard[button_id][0].text, 
+        quote=False
+    ) 
+
+    #Return to user input in case Calcel is clicked
+    if activity_id == -1:
+        return wait_for_input(update, context)
+
+    #Get activity 
+    activity = get_activity_by_id(activity_id=activity_id)
+    leaderboard = get_leaderboard_by_activity_id(activity_id=activity_id)
+    #Record execution of the activity. Create Performed_Activity 
+
+    # Create/Update User 
+    user = create_user(update, context)
+    # Add user to the Leaderboard == Create Participant 
+    # Might be redundant but more robust :D 
+    participant = add_participant(update, user, leaderboard)
+
+    # Create performed Activity
+    performed_activity = Performed_Activity(activity_id = activity.id, participant_id = participant.id)    
+    performed_activity.save_performed_activity()
+
+    query.message.reply_text(
+            f'Activity {activity.activity_name} was tracked\n'
+            f'{activity.points} points were added to {user.name}', 
+            quote=False
+        )
+    return wait_for_input(update, context)
+
+# Handles /delete_activity command
+def delete_command_handler(update:Update, context):
+    
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    # Create Leaderboard if do not exists 
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    # Get leaderboard activities 
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+
+    # If there is no activities return to default
+    if activities.count() < 1:
+        query.message.reply_text(
+            f'✋ There are no activities 😐',
+            quote = False
+        )
+        return wait_for_input(update, context)
+    else:
+        keyboard = []
+        #TODO: Add Cancel button. Should abort deletion of the activity. 
+        # Should end interaction with bot 
+        for indx, act in enumerate(activities):
+            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=f"{indx}_{act.id}")]
+            keyboard.append(key)
+        
+        key = [InlineKeyboardButton(f'❌ Cancel', callback_data=f"{activities.count()}_{-1}")]
+        keyboard.append(key)
+
+        keyboard_markup = InlineKeyboardMarkup(keyboard)
+        
+        query.message.reply_text(
+            f'What Acitivity you would like to delete?', reply_markup=keyboard_markup,
+            quote = False
         )
 
         return DELETE
+
 
 #TODO: Check if any Performed_Activity entities exists. If Yes ask for confirmation 
 def delete(update:Update, context):
     query = update.callback_query
     query.answer()
 
-    activity_id = int(query.data)
-
-    #Delete activity from the database
-    activity = get_activity_by_id(activity_id=activity_id)
-    activity.delete_activity()
+    button_id, activity_id = query.data.split('_')
+    activity_id = int(activity_id)
+    button_id = int(button_id)
 
     #Remove Inline Keyboard
     query.edit_message_reply_markup(
         None
     )
+
     query.message.reply_text(
-            f'Activity {activity.activity_name} was deleted ❌'
+            query.message.reply_markup.inline_keyboard[button_id][0].text, 
+            quote = False
+        )
+
+    if activity_id == -1:
+        return wait_for_input(update, context)
+
+    #Delete activity from the database
+    activity = get_activity_by_id(activity_id=activity_id)
+    activity.delete_activity()
+
+
+    query.message.reply_text(
+            f'Activity {activity.activity_name} was deleted ❌',
+            quote = False
         )
     
     # Get new user input
     return wait_for_input(update, context)
 
 
-#TODO: Implement handling of stop command
 def cancel(update:Update, context):
-    update.message.reply_text(
-        f'Ok. Bye 😕'
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    query.message.reply_text(
+        f'Ok. Bye 😕',
+        quote = False
     )
+    return ConversationHandler.END 
 
 # /show_score - Shows Leaderboard score 
 def show_score_command_handler(update:Update, context):
+
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
 
     chat_id = update.effective_chat.id
     leaderboard = get_leaderboard_by_id(leaderboard_id=chat_id)
@@ -396,15 +491,16 @@ def show_score_command_handler(update:Update, context):
     if score:
         for indx, row in enumerate(score):
             score_message+= f"{'🥇 ' if indx == 0 else ''}" + f"{row['name']}" +' - '+ f"{row['points']}" + '💎\n  '
-        update.message.reply_text(
-            score_message
+        query.message.reply_text(
+            score_message,
+            quote = False
         )
     else:
-        update.message.reply_text(
+        query.message.reply_text(
             f'Leaderboard has not started. Send /start to enter the Leaderboard🏆'
         )
 
-    return ConversationHandler.END 
+    return wait_for_input(update, context) 
 
 # /show_activities - Shows Leaderboard's Activityes 
 def show_activities_command_handler(update:Update, context):
@@ -430,8 +526,33 @@ def show_activities_command_handler(update:Update, context):
         update.message.reply_text(
             message 
         )
-    return ConversationHandler.END
+    return wait_for_input(update, context)
 
+# /show_log - Show last 10 Executed Activities
+def show_log_command_handler(update:Update, context):
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    # Create Leaderboard if do not exists 
+    leaderboard = create_leaderboard(update, context)
+    # Create/Update User 
+    user = create_user(update, context)
+    
+    log = get_leaderboard_log(leaderboard_id = leaderboard.id, count = 10)
+
+    message = ''
+    if log.rowcount > 0: 
+        for row in log: 
+            message += f"{row['name']} - {row['activity_name']} -- {row['points']}💎 -- {row['time_created']:%m-%d %H:%M}\n"
+    else: 
+        message = 'No Activities Performed yet 🤷🏻'
+
+    query.message.reply_text(message, quote = False)
+
+    return wait_for_input(update, context)
 
 def main():
     project_id = os.environ.get('GCLOUD_PROJECT_ID')
@@ -447,11 +568,13 @@ def main():
                      CommandHandler('add_activity', add_activity_command_handler), 
                      CommandHandler('execute_activity', execute_activity_command_handler), 
                      CommandHandler('show_score', show_score_command_handler), 
-                     CommandHandler('show_activities', show_activities_command_handler)], 
+                     CommandHandler('show_activities', show_activities_command_handler),
+                     CommandHandler('show_log', show_log_command_handler), 
+                     CommandHandler('delete_activity',delete_command_handler)], 
         states = {
             ACTIVITY : [ MessageHandler(Filters.all, add_activity, pass_user_data=True)],
             POINTS : [MessageHandler(Filters.all, add_points, pass_user_data=True)], 
-            IDLE : [CallbackQueryHandler( idle,  pass_user_data=True)], 
+            IDLE : [CallbackQueryHandler(idle,  pass_user_data=True)], 
             DELETE : [CallbackQueryHandler(delete, pass_user_data=True)],
             EXECUTE_ACTIVITY : [CallbackQueryHandler(execute_activity, pass_user_data=True)]
         }, 
@@ -459,11 +582,11 @@ def main():
                  CommandHandler('execute_activity', execute_activity_command_handler), 
                  CommandHandler('add_activity', add_activity_command_handler), 
                  CommandHandler('show_score', show_score_command_handler), 
-                 CommandHandler('show_activities', show_activities_command_handler)]
+                 CommandHandler('show_activities', show_activities_command_handler), 
+                 CommandHandler('show_log', show_log_command_handler), 
+                 CommandHandler('cancel', cancel),
+                 CommandHandler('delete_activity',delete_command_handler)]
     )
-
-    #TODO: Implement /stop command 
-
     
     #Create Dispatcher
     disp = updater.dispatcher
