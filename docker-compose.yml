@@ -1,0 +1,40 @@
+version: '3'
+services:
+    bot:
+        build: .
+        environment:
+            - CLOUD_SQL_CONNECTION_NAME="onyx-sequence-373:europe-west3:telegram"
+            - DB_USER=ivan
+            - DB_NAME=leaderboard
+            - GCLOUD_PROJECT_ID="122310846920"
+            - DB_PORT=3306
+            - HOST=db
+            - DB_PASS=password
+            - TOKEN=1242677050:AAE1BA7H6ZztxCA1ozD-4NCMpZtbqp_JZDI
+        ports:
+            - 8080:8080
+        links:
+            - "db"
+    db:
+        image: mysql:5.7
+        restart: always
+        environment:
+            MYSQL_DATABASE: 'leaderboard'
+            # So you don't have to use root, but you can if you like
+            MYSQL_USER: 'ivan'
+            # You can use whatever password you like
+            MYSQL_PASSWORD: 'password'
+            # Password for root access
+            MYSQL_ROOT_PASSWORD: 'password'
+        ports:
+            # <Port exposed> : < MySQL Port running inside container>
+            - '3306:3306'
+        expose:
+            # Opens port 3306 on the container
+            - '3306'
+            # Where our data will be persisted
+        volumes:
+            - my-db:/var/lib/mysql
+    # Names our volume
+volumes:
+    my-db:

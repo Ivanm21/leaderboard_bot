@@ -5,20 +5,53 @@ from sqlalchemy import create_engine, engine
 from sqlalchemy.sql import func
 import os
 import logging
+import gcloud
+import pymysql 
 
-import codecs
 
+env = os.environ.get("ENV")
 
 db_user = os.environ.get("DB_USER")
-db_pass = os.environ.get("DB_PASS")
 db_name = os.environ.get("DB_NAME")
 host = os.environ.get("HOST")
-port = os.environ.get("PORT")
-cloud_sql_connection_name = os.environ.get("CLOUD_SQL_CONNECTION_NAME")
+port = os.environ.get("DB_PORT")
+
+if env == "GCLOUD":
+    cloud_sql_connection_name = os.environ.get("CLOUD_SQL_CONNECTION_NAME")
+    project_id = os.environ.get('GCLOUD_PROJECT_ID')
+    gcl = gcloud.Gcloud(project_id)
+
+    db_pass = gcl.access_secret_version(secret_id="LEADERBOARD-DB_PASS")
+
+    url = engine.url.URL(
+            drivername="mysql+pymysql",
+            username=db_user,  # e.g. "my-database-user"
+            password=db_pass,
+            host=host,
+            port=port,  # e.g. "my-database-password"
+            database=db_name,  # e.g. "my-database-name"
+            query={
+                "unix_socket": "/cloudsql/{}".format(cloud_sql_connection_name)  # i.e "<PROJECT-NAME>:<INSTANCE-REGION>:<INSTANCE-NAME>"
+            }
+        )
+else:
+    db_pass = os.environ.get('DB_PASS')
+    url = engine.url.URL(
+                    drivername="mysql+pymysql",
+                    username=db_user,
+                    password=db_pass,
+                    host=host,
+                    port=port,
+                    database=db_name
+                )
+
+
 
 logger = logging.getLogger()
 
 Base = declarative_base()
+
+
 
 
 def ensure_connection(func):
@@ -29,15 +62,7 @@ def ensure_connection(func):
         db = create_engine(
     # Equivalent URL:
     # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=/cloudsql/<cloud_sql_instance_name>
-            engine.url.URL(
-                drivername="mysql+pymysql",
-                username=db_user,
-                password=db_pass,
-                host=host,
-                port=port,
-                database=db_name
-                # query={"unix_socket": "/cloudsql/{}".format(cloud_sql_connection_name)},
-            ),
+            url,
             pool_size=5,
             max_overflow=2,
             pool_timeout=30,  # 30 seconds

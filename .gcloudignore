@@ -1,0 +1,7 @@
+README.md
+sql
+.vscode
+__pycache__
+config.ps1
+gsql.py
+docker-compose.yml

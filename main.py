@@ -27,10 +27,12 @@ ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY  = range(5)
 EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
 
 
-#TODO: Implement commands
-# All activities should be added to the bot via @botfather /setcommands
-#
-# 
+#TODO: 
+# - Fix format of log on mobile
+# - Fix: Force_reply is sent to all users 
+# - Fix: if inline keyboard is clicked by user who not triggered command, 
+#  -- keyboard is removed but command is not recorded 
+#  -- incorrect button ID is recorded 
  
 # All activities should be added to the bot via @botfather /setcommands
 # Available commands:
@@ -157,6 +159,15 @@ def add_activity_command_handler(update:Update, context):
 #TODO: Add check if activity with same name.lower() exists
 def add_activity(update: Update, context):
     activity = update.message.text
+    if not activity:
+        force_reply = ForceReply(force_reply=True)
+        update.message.reply_text(
+            f'Only text is allowed as a name of the Activity', 
+            reply_markup=force_reply,
+            quote = False
+        )
+        return add_activity_command_handler(update, context)
+
     context.user_data[ACTIVITY] = activity
 
     # Telegram clients will display a reply interface to the user 
@@ -175,7 +186,7 @@ def add_points(update: Update, context):
     points = update.message.text
     try:
         int(points) 
-    except ValueError:
+    except:
         # Telegram clients will display a reply interface to the user 
         # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
         force_reply = ForceReply(force_reply=True, selective=True)
@@ -466,7 +477,7 @@ def cancel(update:Update, context):
         query.answer()
 
     query.message.reply_text(
-        f'Ok. Bye 😕',
+        f'Ok. Bye 👋🏽',
         quote = False
     )
     return ConversationHandler.END 
@@ -555,10 +566,17 @@ def show_log_command_handler(update:Update, context):
     return wait_for_input(update, context)
 
 def main():
-    project_id = os.environ.get('GCLOUD_PROJECT_ID')
 
-    gcl = gcloud.Gcloud(project_id)
-    token = gcl.access_secret_version()
+    env = os.environ.get('ENV')
+
+    if env == "GCLOUD":
+        project_id = os.environ.get('GCLOUD_PROJECT_ID')
+        logging.info(os.environ.get('GCLOUD_PROJECT_ID'))
+
+        gcl = gcloud.Gcloud(project_id)
+        token = gcl.access_secret_version()
+    else:
+        token = os.environ.get("TOKEN")
 
     #Create Updater
     updater = Updater(token=token, use_context=True)

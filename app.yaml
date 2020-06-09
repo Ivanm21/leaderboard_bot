@@ -1,0 +1,8 @@
+runtime: python
+env: flex
+env_variables:
+  CLOUD_SQL_CONNECTION_NAME: onyx-sequence-373:us-central1:telegram-us
+  DB_USER: ivan
+  DB_NAME: leaderboard
+  GCLOUD_PROJECT_ID: '122310846920'
+  ENV: GCLOUD
