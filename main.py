@@ -568,6 +568,9 @@ def show_log_command_handler(update:Update, context):
 def main():
 
     env = os.environ.get('ENV')
+    webhook_url = os.environ.get('WEBHOOK_URL')
+    port = os.environ.get('PORT_T')
+    mode = os.environ.get('MODE')
 
     if env == "GCLOUD":
         project_id = os.environ.get('GCLOUD_PROJECT_ID')
@@ -615,8 +618,13 @@ def main():
     #Init database
     init_db() 
 
-    #Start polling from Telegram
-    updater.start_polling()
+    if mode == 'webhook':
+        #Start polling from Telegram
+        updater.start_webhook(listen='0.0.0.0',
+                        port=port,
+                        url_path=token)
+    else: 
+        updater.start_polling()
 
     updater.idle()
 
