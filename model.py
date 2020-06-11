@@ -314,6 +314,45 @@ class Performed_Activity(Base):
         session.commit()
         session.close()
 
+    @establish_session
+    def delete_performed_activity(self, session):
+        performed_activity = session.merge(self)
+        session.delete(performed_activity)
+        session.commit()
+        session.close()
+
+
+@establish_session
+def get_performed_activities(session, user_id:int, leaderboard_id:int):
+    """
+    Returns Activities performed by user
+    """
+    query = f'''
+        SELECT pa.id, pa.time_created as 'time', a.activity_name as 'name'
+        FROM `leaderboard`.`performed_activity` pa
+        JOIN `leaderboard`.`activities` a
+            ON a.id = pa.activity_id
+        JOIN `leaderboard`.`participants` p
+            ON p.id = pa.participant_id
+        JOIN `leaderboard`.`users` u 
+            ON u.id = p.user_id    
+        JOIN `leaderboard`.`leaderboards` ld
+            ON ld.id = a.leaderboard_id
+        WHERE u.id = {user_id}
+        AND ld.id = {leaderboard_id};
+    '''
+    result = session.execute(query)
+    return result
+
+@establish_session
+def get_performed_activity_by_id(session, id:int):
+    """
+    Returns performed Activity by it
+    """
+    performed_activity = session.query(Performed_Activity).filter_by(id=id).first()
+    return performed_activity        
+
+
 @establish_session
 def get_leaderboard_log(session, leaderboard_id:int, count:int):
     """

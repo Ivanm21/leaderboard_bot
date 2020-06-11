@@ -8,7 +8,7 @@ import os
 
 from model import (Activity, init_db, get_activities_by_user_id, get_activity_by_id, delete_activity_by_id, get_leaderboard_activities,
                     Leaderboard, get_leaderboard_by_id, leaderboard_has_activities, get_leaderboard_by_activity_id,
-                    User, get_user_by_id, get_leaderboard_score,
+                    User, get_user_by_id, get_leaderboard_score, get_performed_activities, get_performed_activity_by_id,
                     Participant, get_participant_by_user_id_and_leaderboard_id,get_leaderboard_log, 
                     Performed_Activity)
 import gcloud
@@ -21,7 +21,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # State variables
-ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY  = range(5) 
+ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY, CANCEL  = range(6) 
 
 # Variables for start flow 
 EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
@@ -387,7 +387,7 @@ def execute_activity(update:Update, context):
             f'{activity.points} points were added to {user.name}', 
             quote=False
         )
-    return wait_for_input(update, context)
+    return ConversationHandler.END
 
 # Handles /delete_activity command
 def delete_command_handler(update:Update, context):
@@ -466,7 +466,7 @@ def delete(update:Update, context):
         )
     
     # Get new user input
-    return wait_for_input(update, context)
+    return ConversationHandler.END
 
 
 def cancel(update:Update, context):
@@ -511,7 +511,7 @@ def show_score_command_handler(update:Update, context):
             f'Leaderboard has not started. Send /start to enter the Leaderboard🏆'
         )
 
-    return wait_for_input(update, context) 
+    return ConversationHandler.END 
 
 # /show_activities - Shows Leaderboard's Activityes 
 def show_activities_command_handler(update:Update, context):
@@ -537,7 +537,7 @@ def show_activities_command_handler(update:Update, context):
         update.message.reply_text(
             message 
         )
-    return wait_for_input(update, context)
+    return ConversationHandler.END
 
 # /show_log - Show last 10 Executed Activities
 def show_log_command_handler(update:Update, context):
@@ -563,7 +563,85 @@ def show_log_command_handler(update:Update, context):
 
     query.message.reply_text(message, quote = False)
 
-    return wait_for_input(update, context)
+    return ConversationHandler.END
+
+#TODO: Implement cancel command
+def cancel_activity_command_handler(update:Update, context):
+    
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    user_id = update.effective_user.id
+    leaderboard_id = update.effective_chat.id
+
+    activities = get_performed_activities(user_id = user_id, leaderboard_id = leaderboard_id)
+    
+    message = ''
+    if activities.rowcount > 0:
+        keyboard = []
+        #TODO: Add Cancel button. Should abort deletion of the activity. 
+        # Should end interaction with bot 
+        for indx, act in enumerate(activities):
+            key = [InlineKeyboardButton(f"{act['name']} - {act['time']:%m-%d %H:%M}", callback_data=f"{indx}_{act['id']}")]
+            keyboard.append(key)
+        
+        key = [InlineKeyboardButton(f'❌ Cancel', callback_data=f"{activities.rowcount}_{-1}")]
+        keyboard.append(key)
+
+        keyboard_markup = InlineKeyboardMarkup(keyboard)
+        
+        query.message.reply_text(
+            f'What Acitivity you would like to cancel?', reply_markup=keyboard_markup,
+            quote = False
+        )
+        return CANCEL
+
+    else:
+        message = 'You have no executed activities yet 🤷🏻'
+        query.message.reply_text(message, quote = False)
+        return ConversationHandler.END
+
+
+def cancel_activity(update: Update, context):
+    query = update.callback_query
+    query.answer()
+
+    button_id, performed_activity_id = query.data.split('_')
+    performed_activity_id = int(performed_activity_id)
+    button_id = int(button_id)
+
+    #Remove Inline Keyboard
+    query.edit_message_reply_markup(
+        None
+    )
+
+    query.message.reply_text(
+            query.message.reply_markup.inline_keyboard[button_id][0].text, 
+            quote = False
+        )
+
+    if performed_activity_id == -1:
+        return cancel(update, context)
+
+    #Delete performed activity from the database
+    performed_activity = get_performed_activity_by_id(id=performed_activity_id)
+    activity = get_activity_by_id(activity_id=performed_activity.activity_id)
+    performed_activity.delete_performed_activity()
+
+
+    query.message.reply_text(
+            f"{activity.activity_name} - {performed_activity.time_created:%m-%d %H:%M} was canceled ❌",
+            quote = False
+        )
+    
+    # Get new user input
+    return ConversationHandler.END
+
+
+
 
 def main():
 
@@ -591,13 +669,15 @@ def main():
                      CommandHandler('show_score', show_score_command_handler), 
                      CommandHandler('show_activities', show_activities_command_handler),
                      CommandHandler('show_log', show_log_command_handler), 
-                     CommandHandler('delete_activity',delete_command_handler)], 
+                     CommandHandler('delete_activity',delete_command_handler),
+                     CommandHandler('cancel_activity',cancel_activity_command_handler)], 
         states = {
             ACTIVITY : [ MessageHandler(Filters.all, add_activity, pass_user_data=True)],
             POINTS : [MessageHandler(Filters.all, add_points, pass_user_data=True)], 
             IDLE : [CallbackQueryHandler(idle,  pass_user_data=True)], 
             DELETE : [CallbackQueryHandler(delete, pass_user_data=True)],
-            EXECUTE_ACTIVITY : [CallbackQueryHandler(execute_activity, pass_user_data=True)]
+            EXECUTE_ACTIVITY : [CallbackQueryHandler(execute_activity, pass_user_data=True)], 
+            CANCEL: [CallbackQueryHandler(cancel_activity, pass_user_data=True)]
         }, 
         fallbacks=[CommandHandler('start', start), 
                  CommandHandler('execute_activity', execute_activity_command_handler), 
@@ -606,7 +686,8 @@ def main():
                  CommandHandler('show_activities', show_activities_command_handler), 
                  CommandHandler('show_log', show_log_command_handler), 
                  CommandHandler('cancel', cancel),
-                 CommandHandler('delete_activity',delete_command_handler)]
+                 CommandHandler('delete_activity',delete_command_handler),
+                 CommandHandler('cancel_activity',cancel_activity_command_handler)]
     )
     
     #Create Dispatcher
