@@ -323,7 +323,7 @@ class Performed_Activity(Base):
 
 
 @establish_session
-def get_performed_activities(session, user_id:int, leaderboard_id:int):
+def get_performed_activities(session, user_id:int, leaderboard_id:int, count:int=10):
     """
     Returns Activities performed by user
     """
@@ -339,7 +339,9 @@ def get_performed_activities(session, user_id:int, leaderboard_id:int):
         JOIN `leaderboard`.`leaderboards` ld
             ON ld.id = a.leaderboard_id
         WHERE u.id = {user_id}
-        AND ld.id = {leaderboard_id};
+        AND ld.id = {leaderboard_id}
+        ORDER BY pa.time_created DESC
+        LIMIT {count};
     '''
     result = session.execute(query)
     return result

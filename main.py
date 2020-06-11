@@ -36,14 +36,15 @@ EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
  
 # All activities should be added to the bot via @botfather /setcommands
 # Available commands:
-# /start - Enter chat's Leaderboard
-# /execute_activity - Record Activity Execution 
-# /show_score - Show current score 
-# /add_activity - Add new Activity
-# /delete_activity - Delete Activity
-# /show_activities - Show Leaderboard's Activityes 
-# /show_log - Show last 10 Executed Activities
-# /cancel - End interaction with the bot
+# start - Enter chat's Leaderboard
+# execute_activity - Record Activity Execution
+# cancel_activity - Cancel Executed Activity
+# show_score - Show current score 
+# add_activity - Add new Activity
+# delete_activity - Delete Activity
+# show_activities - Show Leaderboard's Activityes 
+# show_log - Show last 10 Executed Activities
+# cancel - End interaction with the bot
 
 
 
@@ -304,16 +305,10 @@ def execute_activity_command_handler(update:Update, context):
         query = update.callback_query
         query.answer()
 
-
-    # Create Leaderboard if do not exists 
-    leaderboard = create_leaderboard(update, context)
-    # Create/Update User 
-    user = create_user(update, context)
-    # Add user to the Leaderboard
-    add_participant(update, user, leaderboard)
     
     # Get leaderboard activities 
-    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+    leaderboard_id = update.effective_chat.id
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard_id)
 
     if activities.count() < 1:
         # Telegram clients will display a reply interface to the user 
@@ -329,7 +324,7 @@ def execute_activity_command_handler(update:Update, context):
         keyboard = []
         for i, act in enumerate(activities):
             # Need this to understand what button was clicked
-            data_ = f'{i}_{act.id}'
+            data_ = f'{i}_{act.id}_{act.activity_name}_{act.points}'
             key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=data_)]
             keyboard.append(key)
         
@@ -348,7 +343,7 @@ def execute_activity(update:Update, context):
     query = update.callback_query
     query.answer()
 
-    button_id, activity_id = query.data.split('_')
+    button_id, activity_id, activity_name, points = query.data.split('_')
     activity_id = int(activity_id)
     button_id = int(button_id)
 
@@ -366,25 +361,23 @@ def execute_activity(update:Update, context):
     #Return to user input in case Calcel is clicked
     if activity_id == -1:
         return wait_for_input(update, context)
+    
+    user_id = update.effective_user.id
+    leaderboard_id = update.effective_chat.id
+    participant = get_participant_by_user_id_and_leaderboard_id(user_id = user_id,
+                                                                 leaderboard_id = leaderboard_id)
+    if not participant: 
+        participant = Participant(user_id = user_id, leaderboard_id = leaderboard_id)
+        participant.save_participant()
 
-    #Get activity 
-    activity = get_activity_by_id(activity_id=activity_id)
-    leaderboard = get_leaderboard_by_activity_id(activity_id=activity_id)
-    #Record execution of the activity. Create Performed_Activity 
-
-    # Create/Update User 
-    user = create_user(update, context)
-    # Add user to the Leaderboard == Create Participant 
-    # Might be redundant but more robust :D 
-    participant = add_participant(update, user, leaderboard)
 
     # Create performed Activity
-    performed_activity = Performed_Activity(activity_id = activity.id, participant_id = participant.id)    
+    performed_activity = Performed_Activity(activity_id = activity_id, participant_id = participant.id)    
     performed_activity.save_performed_activity()
 
     query.message.reply_text(
-            f'Activity {activity.activity_name} was tracked\n'
-            f'{activity.points} points were added to {user.name}', 
+            f'Activity {activity_name} was tracked\n'
+            f'{points} points were added to @{update.effective_user.username}', 
             quote=False
         )
     return ConversationHandler.END
@@ -398,12 +391,8 @@ def delete_command_handler(update:Update, context):
         query = update.callback_query
         query.answer()
 
-    # Create Leaderboard if do not exists 
-    leaderboard = create_leaderboard(update, context)
-    # Create/Update User 
-    user = create_user(update, context)
     # Get leaderboard activities 
-    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+    activities = get_leaderboard_activities(leaderboard_id = update.effective_chat.id)
 
     # If there is no activities return to default
     if activities.count() < 1:
@@ -492,12 +481,8 @@ def show_score_command_handler(update:Update, context):
         query.answer()
 
     chat_id = update.effective_chat.id
-    leaderboard = get_leaderboard_by_id(leaderboard_id=chat_id)
-
-    # Create/Update User 
-    user = create_user(update, context)
     
-    score = get_leaderboard_score(leaderboard_id =leaderboard.id)
+    score = get_leaderboard_score(leaderboard_id = chat_id)
     score_message = ''
     if score:
         for indx, row in enumerate(score):
@@ -515,12 +500,10 @@ def show_score_command_handler(update:Update, context):
 
 # /show_activities - Shows Leaderboard's Activityes 
 def show_activities_command_handler(update:Update, context):
-    # Create Leaderboard if do not exists 
-    leaderboard = create_leaderboard(update, context)
-    # Create/Update User 
-    user = create_user(update, context)
+
+    leaderboard_id = update.effective_chat.id
     # Get leaderboard activities 
-    activities = get_leaderboard_activities(leaderboard_id = leaderboard.id)
+    activities = get_leaderboard_activities(leaderboard_id = leaderboard_id)
     
     if activities.count() < 1:
         # Telegram clients will display a reply interface to the user 
@@ -547,12 +530,9 @@ def show_log_command_handler(update:Update, context):
         query = update.callback_query
         query.answer()
 
-    # Create Leaderboard if do not exists 
-    leaderboard = create_leaderboard(update, context)
-    # Create/Update User 
-    user = create_user(update, context)
-    
-    log = get_leaderboard_log(leaderboard_id = leaderboard.id, count = 10)
+    leaderboard_id = update.effective_chat.id
+
+    log = get_leaderboard_log(leaderboard_id = leaderboard_id, count = 10)
 
     message = ''
     if log.rowcount > 0: 

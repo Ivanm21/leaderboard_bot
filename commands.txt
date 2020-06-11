@@ -1,0 +1,8 @@
+start - Enter Leaderboard
+execute_activity - Record Activity Execution
+cancel_activity - Cancel Executed Activity
+show_score - Show current score
+show_log - Show last 10 Executed Activities
+show_activities - Show Leaderboard's Activityes 
+add_activity - Add new Activity
+delete_activity - Delete Activity
