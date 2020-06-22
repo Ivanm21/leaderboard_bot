@@ -1,8 +1,17 @@
-start - Enter Leaderboard
+start - Enter chat's Leaderboard
 execute_activity - Record Activity Execution
-cancel_activity - Cancel Executed Activity
-show_score - Show current score
+show_score - Show current score 
 show_log - Show last 10 Executed Activities
-show_activities - Show Leaderboard's Activityes 
+cancel_activity - Cancel Executed Activity
 add_activity - Add new Activity
+update_activity - Change name or points of the Activity
+show_activities - Show Leaderboard's Activityes 
 delete_activity - Delete Activity
+
+🏡 🏆 Household Leaderboard
+
+🥇See if you can be top of your Household Leaderboard! 🥇
+
+Household Leaderboard was inspired by the frustration at feeling like we were the only ones doing chores in our respective households! Household Leaderboard will once and for all show you who is laziest in the house 🤪
+Add your household members to the chat, create chores, assign them points, and start logging.
+By logging chores members get points. Who got the most points tops the Leaderboard 🏆

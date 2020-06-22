@@ -63,8 +63,8 @@ def ensure_connection(func):
     # Equivalent URL:
     # mysql+pymysql://<db_user>:<db_pass>@/<db_name>?unix_socket=/cloudsql/<cloud_sql_instance_name>
             url,
-            pool_size=5,
-            max_overflow=2,
+            pool_size=0,
+            max_overflow=10,
             pool_timeout=30,  # 30 seconds
             pool_recycle=1800,  # 30 minutes
 
@@ -120,7 +120,7 @@ class Activity(Base):
 
     @establish_session
     def save_activity(self, session):
-        session.add(self)
+        session.merge(self)
         session.commit()
         session.close()
 

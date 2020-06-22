@@ -21,10 +21,10 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # State variables
-ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY, CANCEL  = range(6) 
+ACTIVITY, POINTS, IDLE, DELETE, EXECUTE_ACTIVITY, CANCEL,UPDATE,UPDATE_FINILAZE, CHANGE_ACTIVITY_NAME, CHANGE_ACTIVITY_POINTS   = range(10) 
 
 # Variables for start flow 
-EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
+EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL, CHANGE_POINTS, CHANGE_NAME = range(8)
 
 
 #TODO: 
@@ -42,11 +42,13 @@ EXECUTE, TO_ADD, TO_DELETE, SCORE, LOG, CANCEL = range(6)
 # show_score - Show current score 
 # add_activity - Add new Activity
 # delete_activity - Delete Activity
+# update_activity - Change name or points of the Activity
 # show_activities - Show Leaderboard's Activityes 
 # show_log - Show last 10 Executed Activities
 # cancel - End interaction with the bot
 
-
+#TODO: After show activities allow to click on each activity and show additional actions:
+#[who last executed/log; how often on average activity is executed (monthly, weekly) overall and per user; edit -> name; points; delete  ]
 
 def start(update: Update, context):
 
@@ -422,6 +424,8 @@ def delete_command_handler(update:Update, context):
         return DELETE
 
 
+
+
 #TODO: Check if any Performed_Activity entities exists. If Yes ask for confirmation 
 def delete(update:Update, context):
     query = update.callback_query
@@ -457,6 +461,183 @@ def delete(update:Update, context):
     # Get new user input
     return ConversationHandler.END
 
+
+# Handles /update_activity command
+def update_activity_command_handler(update:Update, context):
+    #If command was triggered from inline keyboard submit
+    query = update
+    if update.callback_query:
+        query = update.callback_query
+        query.answer()
+
+    # Get leaderboard activities 
+    activities = get_leaderboard_activities(leaderboard_id = update.effective_chat.id)
+
+    # If there is no activities return to default
+    if activities.count() < 1:
+        query.message.reply_text(
+            f'✋ There are no activities 😐',
+            quote = False
+        )
+        return wait_for_input(update, context)
+    else:
+        keyboard = []
+        for indx, act in enumerate(activities):
+            key = [InlineKeyboardButton(f'{act.activity_name} - {act.points} points', callback_data=f"{indx}_{act.id}")]
+            keyboard.append(key)
+        
+        key = [InlineKeyboardButton(f'❌ Cancel', callback_data=f"{activities.count()}_{-1}")]
+        keyboard.append(key)
+
+        keyboard_markup = InlineKeyboardMarkup(keyboard)
+        
+        query.message.reply_text(
+            f'What Acitivity you would like to update?', reply_markup=keyboard_markup,
+            quote = False
+        )
+
+        return UPDATE
+
+def what_to_update(update:Update, context):
+    query = update.callback_query
+    query.answer()
+
+    button_id, activity_id = query.data.split('_')
+    activity_id = int(activity_id)
+    button_id = int(button_id)
+
+    #Remove Inline Keyboard
+    query.edit_message_reply_markup(
+        None
+    )
+
+    if activity_id == -1:
+        return ConversationHandler.END
+
+    activity = get_activity_by_id(activity_id=activity_id)
+
+
+    
+    keyboard = []
+    keys = [InlineKeyboardButton(f'📋 Change name', callback_data=f"{activity_id}_{CHANGE_NAME}"), InlineKeyboardButton(f'💎 Change points', callback_data=f"{activity_id}_{CHANGE_POINTS}")]
+    back_key = [InlineKeyboardButton(f'🔙 Back', callback_data=f"{activity_id}_{-1}")]
+    keyboard.append(keys)
+    keyboard.append(back_key)
+    keyboard_markup = InlineKeyboardMarkup(keyboard)
+
+    query.message.reply_text(
+        f"{activity.activity_name} — {activity.points}💎", reply_markup=keyboard_markup,
+        quote = False
+    )
+    
+    # Get new user input
+    return UPDATE_FINILAZE
+
+def update_activity(update:Update, context):
+    if  update.callback_query is None:
+        activity_id = context.user_data[ACTIVITY]
+        button_id = context.user_data[UPDATE]
+        query = update
+    else:        
+        query = update.callback_query
+        activity_id, button_id = query.data.split('_')
+        query.answer()
+        #Remove Inline Keyboard
+        query.edit_message_reply_markup(
+            None, 
+            quote = False
+        )
+
+    activity_id = int(activity_id)
+    button_id = int(button_id)
+
+    context.user_data[ACTIVITY] = activity_id
+
+
+
+    if button_id == -1:
+        return update_activity_command_handler(update, context)
+    elif button_id == CHANGE_NAME:
+        
+        if update.callback_query is not None:
+            query.message.reply_text(
+                query.message.reply_markup.inline_keyboard[0][0].text, 
+                quote=False
+            )
+
+        force_reply = ForceReply(force_reply=True)         
+        query.message.reply_text(
+            f'What is the new name of the activity',
+            reply_markup=force_reply, 
+            quote=False
+        )
+        return CHANGE_ACTIVITY_NAME
+
+    elif button_id == CHANGE_POINTS:
+        activity = get_activity_by_id(activity_id=activity_id)
+        if update.callback_query is not None:
+            query.message.reply_text(
+                query.message.reply_markup.inline_keyboard[0][0].text, 
+                quote=False
+            )
+        force_reply = ForceReply(force_reply=True)       
+        query.message.reply_text(
+            f'How many points should I assign for {activity.activity_name} ?', 
+            reply_markup=force_reply, 
+            quote=False
+        )
+        return CHANGE_ACTIVITY_POINTS
+
+    
+def change_activity_name(update:Update, context):
+    activity_name = update.message.text
+    activity_id = context.user_data[ACTIVITY]
+
+    if not activity_name:
+        force_reply = ForceReply(force_reply=True)
+        update.message.reply_text(
+            f'Only text is allowed as a name of the Activity', 
+            reply_markup=force_reply,
+            quote = False
+        )
+
+        context.user_data[UPDATE] = CHANGE_NAME
+        return update_activity(update, context)
+    
+    activity = get_activity_by_id(activity_id=activity_id)
+    activity.activity_name = activity_name
+    activity.save_activity()
+    update.message.reply_text(
+       f'Ok. Activity name is changed to {activity_name} 😎', 
+        quote = False
+    )
+    return ConversationHandler.END 
+
+def change_activity_points(update:Update, context):
+    points = update.message.text
+    activity_id = context.user_data[ACTIVITY]
+
+    try:
+        points = int(points) 
+    except:
+        # Telegram clients will display a reply interface to the user 
+        # (act as if the user has selected the bot’s message and tapped ‘Reply’) 
+        force_reply = ForceReply(force_reply=True, selective=True)
+        update.message.reply_text(
+            f'{points} is not a number. Please enter number 😊', 
+            reply_markup=force_reply
+        )
+        context.user_data[UPDATE] = CHANGE_POINTS
+        return update_activity(update, context)
+    else:
+        activity = get_activity_by_id(activity_id=activity_id)
+        activity.points = points
+        activity.save_activity()
+        update.message.reply_text(
+            f'Ok. Activity {activity.activity_name} gives {points} points 😎', 
+            quote = False
+        )
+        return ConversationHandler.END 
 
 def cancel(update:Update, context):
     #If command was triggered from inline keyboard submit
@@ -545,7 +726,6 @@ def show_log_command_handler(update:Update, context):
 
     return ConversationHandler.END
 
-#TODO: Implement cancel command
 def cancel_activity_command_handler(update:Update, context):
     
     #If command was triggered from inline keyboard submit
@@ -562,7 +742,6 @@ def cancel_activity_command_handler(update:Update, context):
     message = ''
     if activities.rowcount > 0:
         keyboard = []
-        #TODO: Add Cancel button. Should abort deletion of the activity. 
         # Should end interaction with bot 
         for indx, act in enumerate(activities):
             key = [InlineKeyboardButton(f"{act['name']} - {act['time']:%m-%d %H:%M}", callback_data=f"{indx}_{act['id']}")]
@@ -621,8 +800,6 @@ def cancel_activity(update: Update, context):
     return ConversationHandler.END
 
 
-
-
 def main():
 
     env = os.environ.get('ENV')
@@ -650,14 +827,19 @@ def main():
                      CommandHandler('show_activities', show_activities_command_handler),
                      CommandHandler('show_log', show_log_command_handler), 
                      CommandHandler('delete_activity',delete_command_handler),
-                     CommandHandler('cancel_activity',cancel_activity_command_handler)], 
+                     CommandHandler('cancel_activity',cancel_activity_command_handler),
+                     CommandHandler('update_activity',update_activity_command_handler)], 
         states = {
             ACTIVITY : [ MessageHandler(Filters.all, add_activity, pass_user_data=True)],
             POINTS : [MessageHandler(Filters.all, add_points, pass_user_data=True)], 
             IDLE : [CallbackQueryHandler(idle,  pass_user_data=True)], 
             DELETE : [CallbackQueryHandler(delete, pass_user_data=True)],
             EXECUTE_ACTIVITY : [CallbackQueryHandler(execute_activity, pass_user_data=True)], 
-            CANCEL: [CallbackQueryHandler(cancel_activity, pass_user_data=True)]
+            CANCEL: [CallbackQueryHandler(cancel_activity, pass_user_data=True)],
+            UPDATE: [CallbackQueryHandler(what_to_update, pass_user_data=True)],
+            UPDATE_FINILAZE: [CallbackQueryHandler(update_activity, pass_user_data=True)],
+            CHANGE_ACTIVITY_NAME:  [MessageHandler(Filters.all, change_activity_name, pass_user_data=True)],
+            CHANGE_ACTIVITY_POINTS: [MessageHandler(Filters.all, change_activity_points, pass_user_data=True)]
         }, 
         fallbacks=[CommandHandler('start', start), 
                  CommandHandler('execute_activity', execute_activity_command_handler), 
@@ -667,7 +849,8 @@ def main():
                  CommandHandler('show_log', show_log_command_handler), 
                  CommandHandler('cancel', cancel),
                  CommandHandler('delete_activity',delete_command_handler),
-                 CommandHandler('cancel_activity',cancel_activity_command_handler)]
+                 CommandHandler('cancel_activity',cancel_activity_command_handler),
+                 CommandHandler('update_activity',update_activity_command_handler)]
     )
     
     #Create Dispatcher
